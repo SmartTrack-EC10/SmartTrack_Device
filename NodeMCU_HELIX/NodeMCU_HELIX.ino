@@ -1,25 +1,28 @@
 //****************** Bibliotecas *****************//
+#include <ArduinoJson.h>
 #include <TinyGPS++.h>                            // GPS
 #include <SoftwareSerial.h>                       // Serial (RX/TX)
 #include <ESP8266WiFi.h>                          // Wifi
 #include <PubSubClient.h>                         // MQTT
 
 //****************** Variaveis globais *****************//
-#define DEVICE_UUID      "2feefcf6-b7c8-470f-a628-d92300ef64c4"            //id do dispositivo 
-#define TOPICO_SUBSCRIBE "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/cmd" //tópico MQTT de escuta (Case sensitive - SmartTruck)
-#define TOPICO_PUBLISH   "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/attrs" //tópico MQTT de envio de informações para Broker
-#define ID_MQTT DEVICE_UUID // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
-#define DATA_DELAY 60000    // delay de leitura para envio dos dados
+const char* DEVICE_UUID      = "2feefcf6-b7c8-470f-a628-d92300ef64c4"   //id do dispositivo 
+const char* TOPICO_SUBSCRIBE = "/SmartTruck/" + DEVICE_UUID +  "/cmd"   //tópico MQTT de escuta (Case sensitive - SmartTruck)
+const char* TOPICO_PUBLISH   = "/SmartTruck/" + DEVICE_UUID +  "/attrs" //tópico MQTT de envio de informações para Broker
+const char* ID_MQTT          = DEVICE_UUID // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
+const int   DATA_DELAY       = 60000       // delay de leitura para envio dos dados
 
-const int BAURATE = 9600;   // baurate de comunicação serial
-unsigned long dataMillis = millis();
+std::vector<float> arBatteryMeasurement;   // array de medicoes da bateria
+const int     BAURATE = 9600;              // baurate de comunicação serial
+unsigned long dataMillis = millis();       // start 
                                 
 //****************** Pinagem *****************//
 #define ledGreen    16                        // GPIO16 D0
 #define ledYellow    0                        // GPIO0  D3
 #define ledRed       2                        // GPIO2  D4
-#define GPS_RX       4                        // GPIO4  D2
-#define GPS_TX       5                        // GPIO5  D1
+#define gpsRX        4                        // GPIO4  D2
+#define gpsTX        5                        // GPIO5  D1
+#define battery     A0                        // A0 
 
 //****************** Status ******************//
 bool brokerNotification = false;              // Verifica se chegou alguma notificacao do servidor
@@ -43,7 +46,7 @@ int BROKER_PORT = 1883;                       // Porta do Broker MQTT
 
 //******************** GPS *******************//
 TinyGPSPlus gps;                              // Objeto gps para gerenciamento
-SoftwareSerial gpsSerial(GPS_RX, GPS_TX, false);     // Objeto gpsSerial para a leitura do RX/TX da placa NEO-6M
+SoftwareSerial gpsSerial(gpsRX, gpsTX, false);     // Objeto gpsSerial para a leitura do RX/TX da placa NEO-6M
   
 //****************** Declaracao das Funcoes ******************//
 void InitLeds();
@@ -87,24 +90,16 @@ void loop()
     //caso o tempo tenha excedido, manda os dados para o servidor
     if(ValidaDelay())
     {
+        CheckBattery();          // Realiza a média e envia os dados
         CheckPosition();         // Valida/busca a posicao do dispositivo
     }
     else
     {
         Serial.println("Aguardando 1min!");
     }
-    
-    //envia o status de todos os outputs para o Broker no protocolo esperado
-    //EnviaEstadoOutputMQTT();
 
-    //luminosidade
-    //int sensorValue = analogRead(A0);   // Ler o pino Analógico A0 onde está o LDR
-    //float voltage = sensorValue * (3.3 / 1024.0);   // Converter a leitura analógica (que vai de 0 - 1023) para uma voltagem (0 - 3.3V), quanto de acordo com a intensidade de luz no LDR a voltagem diminui.
-    //Serial.println(voltage);
-    //MQTT.publish(TOPICO_PUBLISH2,dtostrf(voltage, 4, 2, msgBuffer));
-    //keep-alive da comunicação com broker MQTT
+    UpdateBattery();
     mqtt.loop();
-
     delay(5000);
 }
 
@@ -389,6 +384,26 @@ void SendPosition(char* pos) {
         Serial.println(data.c_str());
     }
 }
+
+//Function: Realiza a leitura da bateria
+//Parameters: -
+//Return: -
+void UpdateBattery() {
+    float readValue = analogRead(battery);
+
+    //descarta numeros muito baixo
+    if(readValue < 10)
+    {
+      Serial.println("Battery: tensão muito baixa.")ç
+      return;  
+    }
+
+    float inputVoltage = (readValue * 3.2) / 1023; //calculo para conversao
+    float batteryPorcentage = inputVoltage / 0.2; // calculo com base nos resistores (0.2)
+    Serial.print(measurement);
+    Serial.println("V");
+}
+
 
 //Function: Envia o dado de localização para a Broker
 //Parameters: -
