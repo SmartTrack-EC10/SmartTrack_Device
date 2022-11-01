@@ -96,6 +96,8 @@ void loop()
     {
         VerificaConexoesWiFieMQTT();  // Sempre verifica se as conexoes MQTT e WiFi estao funcioando 
     }
+    
+    DeviceStatusLeds();   
 
     if(millis() - checkMillis > 5000) // verifica as informacoes a cada 5 seg
     {
@@ -307,23 +309,23 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)
     Serial.print("Message MQTT: ");
     Serial.println(msg);
 
-    isBrokerCallback = true
+    isBrokerCallback = true;
 
     if(msg == "s|manutencao")
     {
-        ledStatus = "manutencao"
+        ledStatus = manutencao;
     }
     else if (msg == "s|outGeofence")
     {
-        ledStatus = "outGeofence"
+        ledStatus = outGeofence;
     }
     else if (msg == "s|lowBattery") 
     {
-        ledStatus = "lowBattery"
+        ledStatus = lowBattery;
     }
     else
     {
-        isBrokerCallback = false
+        isBrokerCallback = false;
     }
 }
   
