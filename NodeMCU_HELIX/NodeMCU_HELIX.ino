@@ -1,21 +1,20 @@
 //****************** Bibliotecas *****************//
 #include <ArduinoJson.h>
-#include <TinyGPS++.h>                        // GPS
-#include <SoftwareSerial.h>                   // Serial (RX/TX)
-#include <ESP8266WiFi.h>                      // Wifi
-#include <PubSubClient.h>                     // MQTT
+#include <TinyGPS++.h>                            // GPS
+#include <SoftwareSerial.h>                       // Serial (RX/TX)
+#include <ESP8266WiFi.h>                          // Wifi
+#include <PubSubClient.h>                         // MQTT
 
-//****************** Variaveis globais ***********//
-const char* DEVICE_UUID      = "2feefcf6-b7c8-470f-a628-d92300ef64c4";   //id do dispositivo 
-const char* TOPICO_SUBSCRIBE = "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/cmd";   //tópico MQTT de escuta (Case sensitive - SmartTruck)
-const char* TOPICO_PUBLISH   = "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/attrs"; //tópico MQTT de envio de informações para Broker
-const char* ID_MQTT    = DEVICE_UUID;         // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
-const int   DATA_DELAY = 120000 ;             // delay de leitura para envio dos dados (2 min)
-std::vector<float> arBatteryMeasurement;      // array de medicoes da bateria
-const int          BAURATE = 9600;            // baurate de comunicação serial
-unsigned long      dataMillis = millis();     // start
-unsigned long      checkMillis = millis();    // leitura dos valores
-bool               isBrokerCallback = false;  // sinalizacao do broker para o operador 
+//****************** Variaveis globais *****************//
+const char* DEVICE_UUID      = "2feefcf6-b7c8-470f-a628-d92300ef64c4"   //id do dispositivo 
+const char* TOPICO_SUBSCRIBE = "/SmartTruck/" + DEVICE_UUID +  "/cmd"   //tópico MQTT de escuta (Case sensitive - SmartTruck)
+const char* TOPICO_PUBLISH   = "/SmartTruck/" + DEVICE_UUID +  "/attrs" //tópico MQTT de envio de informações para Broker
+const char* ID_MQTT          = DEVICE_UUID // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
+const int   DATA_DELAY       = 60000       // delay de leitura para envio dos dados
+
+std::vector<float> arBatteryMeasurement;   // array de medicoes da bateria
+const int     BAURATE = 9600;              // baurate de comunicação serial
+unsigned long dataMillis = millis();       // start 
                                 
 //****************** Pinagem *****************//
 #define ledRed      16                        // GPIO16 D0
@@ -24,49 +23,40 @@ bool               isBrokerCallback = false;  // sinalizacao do broker para o op
 #define gpsRX        4                        // GPIO4  D2
 #define gpsTX        5                        // GPIO5  D1
 #define battery     A0                        // A0 
-#define vibSensor   14                        // GPIO14 D5
-
-//****************** Trator Ligado *****************//
-bool isTruckOn               = false;          // Informa q o trator esta em funcionamento
-bool validaTruckOn           = false;          // Valida se o trator esta ligado
-const int truckDelay         = 60000;          // 1 Min
-unsigned long truckStart     = 0;              // Tempo em millisegundos quando o trator iniciou
-unsigned long truckFinished  = 0;              // Tempo em millisegundos quando o trator desligou
-unsigned long truckDelayStop = 0;              // Tempo em millisegundos p/ desligar
 
 //****************** Status ******************//
 bool brokerNotification = false;              // Verifica se chegou alguma notificacao do servidor
 enum ledsConfig {                             // Enum de sinalizacao
     startDevice,                              // Inicializacao do dispositivo
-    ativo,                                    // Ativo
-    mqttWifiLost,                             // Conexao perdida com o MQTT/Wifi
-    manutencao,                               // Manutencao Ativa
-    outGeofence,                              // Fora do talhao ou fazenda
-    lowBattery                                // Bateria baixa
+    ok,                                       // Todas conexoes OK
+    mqttLost,                                 // Conexao perdida com o MQTT
+    wifiLost                                  // Conexao perdida com o Wifi
 };
 ledsConfig ledStatus = startDevice;           // Variavel de sinalizacao        
  
 //******************* Wifi *******************//
 WiFiClient wifiClient;                        // Objeto wifiClient para gerenciar a conexao Wifi
-const char* SSID     = "Sylvio";               // Nome da rede WI-FI
-const char* PASSWORD = "15041963";          // Senha da rede WI-FI
+const char* SSID     = "";              // Nome da rede WI-FI
+const char* PASSWORD = "";            // Senha da rede WI-FI
   
 //******************* MQTT *******************//
 PubSubClient mqtt(wifiClient);                // Objeto MQTT, conectado ao WiFI, para genrenciar a conexao MQTT
-const char* BROKER_MQTT = "52.7.63.69";       // Endereco para a conexao com o Broker
+const char* BROKER_MQTT = "";     // Endereco para a conexao com o Broker
 int BROKER_PORT = 1883;                       // Porta do Broker MQTT
 
 //******************** GPS *******************//
 TinyGPSPlus gps;                              // Objeto gps para gerenciamento
-SoftwareSerial gpsSerial(gpsRX, gpsTX);       // Objeto gpsSerial para a leitura do RX/TX da placa NEO-6M
+SoftwareSerial gpsSerial(gpsRX, gpsTX, false);     // Objeto gpsSerial para a leitura do RX/TX da placa NEO-6M
   
 //****************** Declaracao das Funcoes ******************//
-void InitInputs();
+void InitLeds();
 void DeviceStatusLeds();
 void ShutdownLeds();
 void DeviceOKLeds();
 void StartDeviceLeds();
-void LostConnectingMQTTWiFiLeds();
+void LostConnectingWiFiLeds();
+void LostConnectingMQTTLeds(); 
+void InitSerial();
 void InitWiFi();
 void ReconectWiFi();
 void InitMQTT();
@@ -74,7 +64,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void ReconnectMQTT();
 void VerificaConexoesWiFieMQTT(void);
 void CheckPosition();
-void UpdatePosition(char* position);
+void SendPosition(char* position);
 bool ValidaDelay();
  
 //Function: Inicializacao do Dispositivo
@@ -82,7 +72,8 @@ bool ValidaDelay();
 //Retrun: -
 void setup() 
 {
-    InitInputs();
+    InitSerial();
+    InitLeds();
     InitWiFi();
     InitMQTT();
 }
@@ -92,39 +83,35 @@ void setup()
 //Retrun: -
 void loop() 
 { 
-    if(!isBrokerCallback)   
+    VerificaConexoesWiFieMQTT(); // Sempre verifica se as conexoes MQTT e WiFi estao funcioando
+    
+    DeviceOKLeds();              // Informa que tudo esta funcionando corretamente
+
+    //caso o tempo tenha excedido, manda os dados para o servidor
+    if(ValidaDelay())
     {
-        VerificaConexoesWiFieMQTT();  // Sempre verifica se as conexoes MQTT e WiFi estao funcioando 
+        CheckBattery();          // Realiza a média e envia os dados
+        CheckPosition();         // Valida/busca a posicao do dispositivo
+    }
+    else
+    {
+        Serial.println("Aguardando 1min!");
     }
 
-    if(millis() - checkMillis > 5000) // verifica as informacoes a cada 5 seg
-    {
-        CheckTruckOn();               // Verifica se o trator esta em funcionamento
-        CheckBattery();               // Realiza a média e envia os dados
-        checkMillis = millis();
-    }    
-       if(ValidaDelay())                 //caso o tempo tenha excedido, manda os dados para o servidor
-    {
-        CheckPosition();              // Valida/busca a posicao do dispositivo
-        UpdateBattery();
-        UpdateWorkedHours();
-    }
-       mqtt.loop();
+    UpdateBattery();
+    mqtt.loop();
+    delay(5000);
 }
 
-//Function: Inicia as entradas/saidas para acionamento e monitoramento
+//Function: Inicia as saidas para acionamento dos Leds
 //Parameters: -
 //Retrun: -
-void InitInputs()
+void InitLeds()
 {
     pinMode(ledRed,    OUTPUT);
     pinMode(ledGreen,  OUTPUT);
-    pinMode(ledBlue,   OUTPUT);    
-    pinMode(vibSensor,  INPUT);
-
-    gpsSerial.begin(BAURATE);
-    Serial.begin(BAURATE);
-    Serial.println("Esperando dados...");
+    pinMode(ledYellow, OUTPUT);
+    pinMode(ledRed,    OUTPUT);
 
     DeviceStatusLeds();
 }
@@ -138,20 +125,14 @@ void DeviceStatusLeds()
     case startDevice:
       StartDeviceLeds();
       break;
-    case ativo:
-      DeviceOKLeds();
+    case ok:
+      digitalWrite(ledGreen, HIGH); //tudo funcionando 
       break;
-    case mqttWifiLost: 
-      LostConnectingMQTTWiFiLeds();
+    case mqttLost: 
+      LostConnectingWiFiLeds();
       break;
-    case manutencao: 
-      ManutencaoLeds();
-      break;
-    case outGeofence:
-      OutGeofenceLeds();
-      break;
-    case lowBattery:
-      LowBatteryLeds();
+    case wifiLost: 
+      LostConnectingMQTTLeds();
       break;
   }
 }
@@ -161,9 +142,19 @@ void DeviceStatusLeds()
 //Retrun: -
 void ShutdownLeds()
 {
-    digitalWrite(ledRed,    0);
-    digitalWrite(ledGreen,  0);
-    digitalWrite(ledBlue,   0);
+    digitalWrite(ledGreen,  LOW);
+    digitalWrite(ledYellow, LOW);
+    digitalWrite(ledRed,    LOW);
+
+    delay(200);
+}
+
+//Function: Sinalizacao que o device esta funcionando corretamente
+//Parameters: -
+//Retrun: -
+void DeviceOKLeds(){
+    digitalWrite(ledGreen, HIGH);     
+    delay(200);                      
 }
 
 //Function: Sinalizacao que o dispositivo foi iniciado
@@ -173,16 +164,16 @@ void StartDeviceLeds()
 {
     ShutdownLeds();
     for(int i = 0; i < 3; i++){
-        analogWrite(ledRed, 255);     // turn the LED on (HIGH is the voltage level)
-        delay(300);                       // wait for a second 200ms
-        analogWrite(ledRed, 0);  
-        analogWrite(ledGreen, 255);
-        delay(300);                   
-        analogWrite(ledGreen, 0); 
-        analogWrite(ledBlue, 255);   
-        delay(300);                   
-        analogWrite(ledBlue, 0);
-        delay(100);
+        digitalWrite(ledGreen, HIGH);     // turn the LED on (HIGH is the voltage level)
+        delay(200);                       // wait for a second 200ms
+        digitalWrite(ledGreen, LOW);  
+        digitalWrite(ledYellow, HIGH);
+        delay(200);                   
+        digitalWrite(ledYellow, LOW); 
+        digitalWrite(ledRed, HIGH);   
+        delay(200);                   
+        digitalWrite(ledRed, LOW);
+        delay(500); 
     }
 }
 
@@ -198,40 +189,50 @@ void DeviceOKLeds()
 //Function: Sinalizacao que a rede WiFi nao esta conectada
 //Parameters: -
 //Return: -
-void LostConnectingMQTTWiFiLeds()
+void LostConnectingWiFiLeds()
 {
     ShutdownLeds();
     analogWrite(ledRed,   255);
     analogWrite(ledBlue,  255);
 }
 
-//Function: Sinalizacao que o trator precisa de manutencao
-//Parameters: -`
-//Return: -
-void ManutencaoLeds()
-{
-    ShutdownLeds();
-    analogWrite(ledRed,   255);
-    analogWrite(ledGreen, 50);
+    digitalWrite(ledYellow, HIGH);     // turn the LED on (HIGH is the voltage level)
+    delay(200);                        // wait for a second 100ms 
+    digitalWrite(ledYellow, LOW);
+    delay(200);                   
+    digitalWrite(ledYellow, HIGH);   
+    delay(200);                   
+    digitalWrite(ledYellow, LOW);
 }
 
-//Function: Sinalizacao que o trator precisa de manutencao
+//Function: Sinalizacao que a rede MQTT nao esta conectada
 //Parameters: -
 //Return: -
-void OutGeofenceLeds()
+void LostConnectingMQTTLeds()
 {
     ShutdownLeds();
-    analogWrite(ledGreen, 255);
-    analogWrite(ledBlue,  255);
-}
 
-//Function: Sinalizacao que o trator precisa de manutencao
+    digitalWrite(ledYellow, HIGH);     // turn the LED on (HIGH is the voltage level)
+    delay(200);                        // wait for a second 100ms 
+    digitalWrite(ledYellow, LOW);
+    delay(200);                   
+    digitalWrite(ledYellow, HIGH);   
+    delay(200);                   
+    digitalWrite(ledYellow, LOW);
+    delay(200);                   
+    digitalWrite(ledYellow, HIGH);   
+    delay(200);                   
+    digitalWrite(ledYellow, LOW);     
+}
+  
+//Function: Inicializacao da Serial p/ debug
 //Parameters: -
 //Return: -
-void LowBatteryLeds()
+void InitSerial() 
 {
-    ShutdownLeds();
-    analogWrite(ledRed,   255);
+    gpsSerial.begin(BAURATE);
+    Serial.begin(BAURATE);
+    Serial.println("Esperaando dados...");    
 }
  
 //Function: Informacao via serial de conexao com o Wifi
@@ -258,7 +259,7 @@ void ReconectWiFi()
     if (WiFi.status() == WL_CONNECTED)
         return;
 
-    ledStatus = mqttWifiLost;
+    ledStatus = wifiLost;
          
     WiFi.begin(SSID, PASSWORD); // Conecta na rede WI-FI
      
@@ -330,7 +331,9 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)
 //Return: 
 void ReconnectMQTT() 
 {
-    ledStatus = mqttWifiLost;
+    while (!mqtt.connected()) 
+    {
+        ledStatus = mqttLost;
 
     Serial.print("Tentando se conectar ao Broker MQTT: ");
     Serial.println(BROKER_MQTT);
@@ -361,7 +364,7 @@ void VerificaConexoesWiFieMQTT(void)
         ReconnectMQTT(); //se não há conexão com o Broker, a conexão é refeita
 }
 
-//Function: Realiza a leitura da posicao atual
+//Function: Envia o dado de localização para a Broker
 //Parameters: -
 //Return: -
 void CheckPosition() {        
@@ -376,9 +379,9 @@ void CheckPosition() {
 
     if(gps.location.isValid())
     {
-      if(gps.location.isUpdated())
+      if(gps.location.isUpdated()
       {
-        char pos[100];
+        char pos[100];    
         float lat = gps.location.lat();
         float lng = gps.location.lng();
           
@@ -387,27 +390,27 @@ void CheckPosition() {
         Serial.print("GPS send: ");
         Serial.print(pos);
         Serial.println(".");
-
-        UpdatePosition(pos);
       }
       else 
       {
         Serial.println("GPS não atualizado!");
       }
+
+      SendPosition(pos);
     }
-    else
-    {
-        Serial.println("GPS invalido!");
-    }
+    
+    Serial.println();
+    Serial.println(gpsSerial.available());
 }
 
-//Function: Envia o dado de localização para o Broker
+//Function: Envia o dado de localização para a Broker
 //Parameters: string | position | lat e long
 //Return: -
-void UpdatePosition(char* pos) {
+void SendPosition(char* pos) {
     String data = "loc|"; //topico para envio
-    
-    data += pos; // adiciona a posicao
+
+    //by test using default values
+    data += pos;
 
     if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
         Serial.print("Localizacao enviada com sucesso: ");
@@ -415,137 +418,27 @@ void UpdatePosition(char* pos) {
     }
 }
 
-//Function: Realiza a leitura da baterria 
-//Parameters: string | position | lat e long
+//Function: Realiza a leitura da bateria
+//Parameters: -
 //Return: -
-void CheckBattery() {
+void UpdateBattery() {
     float readValue = analogRead(battery);
 
     //descarta numeros muito baixo
     if(readValue < 10)
     {
-      Serial.println("Battery: tensão muito baixa.");
+      Serial.println("Battery: tensão muito baixa.")ç
       return;  
     }
 
     float inputVoltage = (readValue * 3.2) / 1023; //calculo para conversao
-    float batteryMeasurement = inputVoltage / 0.2; // calculo com base nos resistores (0.2)
-    Serial.print(batteryMeasurement);
+    float batteryPorcentage = inputVoltage / 0.2; // calculo com base nos resistores (0.2)
+    Serial.print(measurement);
     Serial.println("V");
-
-    arBatteryMeasurement.push_back(batteryMeasurement);
 }
 
-//Function: Envia a media dos valores da bateria para o Broker
-//Parameters: -
-//Return: -
-void UpdateBattery() {
-    if(arBatteryMeasurement.size() > 10)
-    {
-        String data = "bt|"; //topico para envio
 
-        float sum = 0;
-
-        for(int i = 0; i < arBatteryMeasurement.size(); i++)
-            sum += arBatteryMeasurement[i];
-
-        float batteryAvg = sum / arBatteryMeasurement.size();
-        data += String(batteryAvg);
-
-        if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
-            Serial.print("Bateria enviada com sucesso: ");
-            arBatteryMeasurement.erase(arBatteryMeasurement.begin());
-        }
-        else
-        {
-            Serial.print("Erro ao enviar o Bateria: ");
-        }
-
-        Serial.println(data.c_str());
-    }
-    else
-    {
-        Serial.print("Bateria size: ");
-        Serial.println(arBatteryMeasurement.size());
-    }
-}
-
-//Function: Verifica se o trator esta em funcionamento
-//Parameters: -
-//Return: -
-void CheckTruckOn() {
-    long vibrationMeasurement = pulseIn(vibSensor, HIGH); 
-    Serial.print("Vibration value: ");
-    Serial.println(vibrationMeasurement);
-
-    if(vibrationMeasurement > 100 && !validaTruckOn && !isTruckOn) //sinaliza que o trator foi ligado
-    {
-        Serial.println("Vibration check");
-        validaTruckOn = true;
-        truckStart = millis();
-    }     
-    else if(vibrationMeasurement > 100 && validaTruckOn && !isTruckOn && millis() - truckStart > truckDelay) //verifica se nao ha interferenia e o trator esta realmente ligado
-    {
-        Serial.println("Truck On");
-        isTruckOn = true;
-        validaTruckOn = false;
-    }
-    
-    if(isTruckOn && vibrationMeasurement < 100 && truckDelayStop != 0 && millis() - truckDelayStop > truckDelay) //trator desligado, armazena o millisegundos
-    {
-        Serial.println("Truck off");
-        isTruckOn = false;
-        truckFinished = millis();
-        truckDelayStop = 0;
-    }
-    else if(isTruckOn && truckDelayStop == 0 && vibrationMeasurement < 100) //verifica se realmente o trator foi desligado
-    {
-        Serial.println("Truck will stop?");
-        truckDelayStop = millis();
-    }
-    else if(isTruckOn && vibrationMeasurement > 100)
-    {
-        Serial.println("Truck delay stop clear");
-        truckDelayStop = 0;
-    }
-}
-
-//Function: Atualiza as horas trabalhadas no Broker
-//Parameters: -
-//Return: -
-void UpdateWorkedHours() {
-    if(!isTruckOn && truckStart > 0 && truckFinished > 0)
-    {
-        String data = "wk|"; //topico para envio
-    
-        data += String(truckFinished - truckStart); // adiciona o tempo em millisegundos
-
-        if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
-            Serial.print("WorkedHours enviada com sucesso: ");  
-            truckStart = 0;
-            truckFinished = 0;  
-        }
-        else
-        {
-            Serial.print("Erro ao enviar o WorkedHours: ");
-        }
-
-        Serial.println(data.c_str());
-    }
-    else
-    {
-        Serial.print("Truck is ");
-        Serial.println(isTruckOn);
-
-        Serial.print("Truck started at: ");
-        Serial.println(truckStart);
-
-        Serial.print("Truck finished at: ");
-        Serial.println(truckFinished);
-    }
-}
-
-//Function: Verifica o intervalo de transmissao das informacoes
+//Function: Envia o dado de localização para a Broker
 //Parameters: -
 //Return: boolean
 bool ValidaDelay() {
