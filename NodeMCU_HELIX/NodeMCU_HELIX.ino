@@ -1,14 +1,14 @@
 //****************** Bibliotecas *****************//
-#include <ArduinoJson.h>
+#include <ArduinoJson.h>                      // JSON
 #include <TinyGPS++.h>                        // GPS
 #include <SoftwareSerial.h>                   // Serial (RX/TX)
 #include <ESP8266WiFi.h>                      // Wifi
 #include <PubSubClient.h>                     // MQTT
 
 //****************** Variaveis globais ***********//
-const char* DEVICE_UUID      = "2feefcf6-b7c8-470f-a628-d92300ef64c4";   //id do dispositivo 
-const char* TOPICO_SUBSCRIBE = "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/cmd";   //tópico MQTT de escuta (Case sensitive - SmartTruck)
-const char* TOPICO_PUBLISH   = "/SmartTruck/2feefcf6-b7c8-470f-a628-d92300ef64c4/attrs"; //tópico MQTT de envio de informações para Broker
+const char* DEVICE_UUID      = "urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808"; //id do dispositivo 
+const char* TOPICO_SUBSCRIBE = "/SmartTruck/urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808/cmd";   //tópico MQTT de escuta (Case sensitive - SmartTruck)
+const char* TOPICO_PUBLISH   = "/SmartTruck/urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808/attrs"; //tópico MQTT de envio de informações para Broker
 const char* ID_MQTT    = DEVICE_UUID;         // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
 const int   DATA_DELAY = 120000 ;             // delay de leitura para envio dos dados (2 min)
 std::vector<float> arBatteryMeasurement;      // array de medicoes da bateria
@@ -325,6 +325,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)
     }
     else
     {
+        ledStatus = ativo;
         isBrokerCallback = false;
     }
 }
