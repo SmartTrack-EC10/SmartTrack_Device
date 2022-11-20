@@ -7,8 +7,11 @@
 
 //****************** Variaveis globais ***********//
 const char* DEVICE_UUID          = ""; //id do dispositivo 
-const char* TOPICO_SUBSCRIBE     = "/SmartTruck//cmd";  //tópico MQTT de escuta (Case sensitive - SmartTruck)
-const char* TOPICO_PUBLISH       = "/SmartTruck//attrs";
+const char* TOPICO_SUBSCRIBE     = "/SmartTruck/urn:ngsi-ld:Truck:/cmd";  //tópico MQTT de escuta (Case sensitive - SmartTruck)
+const char* TOPICO_PUBLISH_LOC       = "/SmartTruck//attrs/loc";
+const char* TOPICO_PUBLISH_LWH       = "/SmartTruck//attrs/lwh";
+const char* TOPICO_PUBLISH_BT        = "/SmartTruck//attrs/bt";
+const char* TOPICO_PUBLISH_DS        = "/SmartTruck//attrs/ds";
 const char* ID_MQTT    = DEVICE_UUID;         // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
 const int   DATA_DELAY = 30000 ;             // delay de leitura para envio dos dados (2 min)
 std::vector<float> arBatteryMeasurement;      // array de medicoes da bateria
@@ -266,6 +269,7 @@ void ReconectWiFi()
         return;
 
     ledStatus = mqttWifiLost;
+    DeviceStatusLeds();
          
     WiFi.begin(SSID, PASSWORD); // Conecta na rede WI-FI
      
@@ -340,6 +344,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length)
 void ReconnectMQTT() 
 {
     ledStatus = mqttWifiLost;
+    DeviceStatusLeds();
 
     Serial.print("Tentando se conectar ao Broker MQTT: ");
     Serial.println(BROKER_MQTT);
@@ -364,16 +369,16 @@ void ReconnectMQTT()
 void TurnOnOff() 
 {
     String data = "";
-    data = "ds|off";
-    if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
+    data = "desligado";
+    if(mqtt.publish(TOPICO_PUBLISH_DS, data.c_str())){
         Serial.print("Device: ");
         Serial.println(data); 
     }
 
     delay(1000);
 
-    data = "ds|on";
-    if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
+    data = "ligado";
+    if(mqtt.publish(TOPICO_PUBLISH_DS, data.c_str())){
         Serial.print("Device: ");
         Serial.println(data); 
     }
@@ -437,11 +442,11 @@ void CheckPosition() {
 //Parameters: char* | position | lat e long
 //Return: -
 void UpdatePosition(char* pos) {
-    String data = "loc|"; //topico para envio
+    String data = ""; //topico para envio
     
     data += pos; // adiciona a posicao
 
-    if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
+    if(mqtt.publish(TOPICO_PUBLISH_LOC , data.c_str())){
         Serial.print("Localizacao enviada com sucesso: ");
         Serial.println(data.c_str());
     }
@@ -474,8 +479,7 @@ void CheckBattery() {
 void UpdateBattery() {
     if(arBatteryMeasurement.size() > 10)
     {
-        String data = "bt|"; //topico para envio
-
+        String data = ""; //topico para envio
         float sum = 0;
 
         for(int i = 0; i < arBatteryMeasurement.size(); i++)
@@ -484,7 +488,7 @@ void UpdateBattery() {
         float batteryAvg = sum / arBatteryMeasurement.size();
         data += String(batteryAvg);
 
-        if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
+        if(mqtt.publish(TOPICO_PUBLISH_BT , data.c_str())){
             Serial.print("Bateria enviada com sucesso: ");
             arBatteryMeasurement.erase(arBatteryMeasurement.begin());
         }
@@ -558,10 +562,9 @@ float milliToHours(unsigned long nMillis){
 void UpdateWorkedHours() {
     if(!isTruckOn && truckStart > 0 && truckFinished > 0)
     {
-        String data = "lwk|";
-        data += String(milliToHours(truckFinished - truckStart)); // adiciona o tempo em millisegundos
+        String data = String(milliToHours(truckFinished - truckStart)); // adiciona o tempo em millisegundos
 
-        if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
+        if(mqtt.publish(TOPICO_PUBLISH_LWH, data.c_str())){
             Serial.print("WorkedHours enviada com sucesso: ");  
             truckStart = 0;
             truckFinished = 0;  
