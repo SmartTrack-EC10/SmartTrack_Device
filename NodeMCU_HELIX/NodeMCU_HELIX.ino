@@ -6,11 +6,11 @@
 #include <PubSubClient.h>                     // MQTT
 
 //****************** Variaveis globais ***********//
-const char* DEVICE_UUID      = "urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808"; //id do dispositivo 
-const char* TOPICO_SUBSCRIBE = "/SmartTruck/urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808/cmd";   //tópico MQTT de escuta (Case sensitive - SmartTruck)
-const char* TOPICO_PUBLISH   = "/SmartTruck/urn:ngsi-ld:Truck:09b5bb4b-63e7-459f-9e9a-95d4bd1a2808/attrs"; //tópico MQTT de envio de informações para Broker
+const char* DEVICE_UUID          = ""; //id do dispositivo 
+const char* TOPICO_SUBSCRIBE     = "/SmartTruck//cmd";  //tópico MQTT de escuta (Case sensitive - SmartTruck)
+const char* TOPICO_PUBLISH       = "/SmartTruck//attrs";
 const char* ID_MQTT    = DEVICE_UUID;         // id mqtt (para identificação de sessão) IMPORTANTE: este deve ser único no broker    
-const int   DATA_DELAY = 120000 ;             // delay de leitura para envio dos dados (2 min)
+const int   DATA_DELAY = 30000 ;             // delay de leitura para envio dos dados (2 min)
 std::vector<float> arBatteryMeasurement;      // array de medicoes da bateria
 const int          BAURATE = 9600;            // baurate de comunicação serial
 unsigned long      dataMillis = millis();     // start
@@ -48,12 +48,12 @@ ledsConfig ledStatus = startDevice;           // Variavel de sinalizacao
  
 //******************* Wifi *******************//
 WiFiClient wifiClient;                        // Objeto wifiClient para gerenciar a conexao Wifi
-const char* SSID     = "Sylvio";               // Nome da rede WI-FI
-const char* PASSWORD = "15041963";          // Senha da rede WI-FI
+const char* SSID     = "";               // Nome da rede WI-FI
+const char* PASSWORD = "";          // Senha da rede WI-FI
   
 //******************* MQTT *******************//
 PubSubClient mqtt(wifiClient);                // Objeto MQTT, conectado ao WiFI, para genrenciar a conexao MQTT
-const char* BROKER_MQTT = "52.7.63.69";       // Endereco para a conexao com o Broker
+const char* BROKER_MQTT = "";       // Endereco para a conexao com o Broker
 int BROKER_PORT = 1883;                       // Porta do Broker MQTT
 
 //******************** GPS *******************//
@@ -75,6 +75,7 @@ void ReconnectMQTT();
 void VerificaConexoesWiFieMQTT(void);
 void CheckPosition();
 void UpdatePosition(char* position);
+void TurnOnOff(char* status);
 bool ValidaDelay();
  
 //Function: Inicializacao do Dispositivo
@@ -91,10 +92,10 @@ void setup()
 //Parameters: -
 //Retrun: -
 void loop() 
-{ 
-    if(!isBrokerCallback)   
+{   
+    if(!isBrokerCallback)
     {
-        VerificaConexoesWiFieMQTT();  // Sempre verifica se as conexoes MQTT e WiFi estao funcioando 
+      VerificaConexoesWiFieMQTT();  // Sempre verifica se as conexoes MQTT e WiFi estao funcioando
     }
     
     DeviceStatusLeds();   
@@ -103,14 +104,14 @@ void loop()
     {
         CheckTruckOn();               // Verifica se o trator esta em funcionamento
         CheckBattery();               // Realiza a média e envia os dados
-        checkMillis = millis();
+        checkMillis = millis();       // atualiza o tempo atual
     }    
 	
     if(ValidaDelay())                 //caso o tempo tenha excedido, manda os dados para o servidor
     {
         CheckPosition();              // Valida/busca a posicao do dispositivo
-        UpdateBattery();
-        UpdateWorkedHours();
+        UpdateBattery();              // Atualiza a bateria no broker
+        UpdateWorkedHours();          // Atualiza as horas trabalhadas se ouver
     }
 	
     mqtt.loop();
@@ -125,6 +126,7 @@ void InitInputs()
     pinMode(ledGreen,  OUTPUT);
     pinMode(ledBlue,   OUTPUT);    
     pinMode(vibSensor,  INPUT);
+    pinMode(battery,    INPUT);
 
     gpsSerial.begin(BAURATE);
     Serial.begin(BAURATE);
@@ -214,9 +216,10 @@ void LostConnectingMQTTWiFiLeds()
 //Return: -
 void ManutencaoLeds()
 {
-    ShutdownLeds();
+    //ShutdownLeds();
     analogWrite(ledRed,   255);
     analogWrite(ledGreen, 50);
+    analogWrite(ledBlue,   0);
 }
 
 //Function: Sinalizacao que o trator precisa de manutencao
@@ -225,7 +228,7 @@ void ManutencaoLeds()
 void OutGeofenceLeds()
 {
     ShutdownLeds();
-    analogWrite(ledGreen, 255);
+    analogWrite(ledGreen, 0);
     analogWrite(ledBlue,  255);
 }
 
@@ -269,6 +272,7 @@ void ReconectWiFi()
     while (WiFi.status() != WL_CONNECTED) 
     {
         Serial.print(".");
+        delay(100);
     }
 
     if (WiFi.status() == WL_CONNECTED)
@@ -344,12 +348,35 @@ void ReconnectMQTT()
         Serial.println("Conectado com sucesso ao broker MQTT!");
         mqtt.subscribe(TOPICO_SUBSCRIBE); 
         ledStatus = ativo;
+
+        TurnOnOff();
     } 
     else
     {
         Serial.println("Falha ao reconectar no broker.");
         Serial.println("Havera nova tentatica de conexao!");
     }    
+}
+
+//Função: Envia e atualiza o status do device no broker
+//Parâmetros: nenhum
+//Retorno: nenhum
+void TurnOnOff() 
+{
+    String data = "";
+    data = "ds|off";
+    if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
+        Serial.print("Device: ");
+        Serial.println(data); 
+    }
+
+    delay(1000);
+
+    data = "ds|on";
+    if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
+        Serial.print("Device: ");
+        Serial.println(data); 
+    }
 }
 
 //Função: verifica o estado das conexões WiFI e ao broker MQTT. 
@@ -407,7 +434,7 @@ void CheckPosition() {
 }
 
 //Function: Envia o dado de localização para o Broker
-//Parameters: string | position | lat e long
+//Parameters: char* | position | lat e long
 //Return: -
 void UpdatePosition(char* pos) {
     String data = "loc|"; //topico para envio
@@ -420,12 +447,12 @@ void UpdatePosition(char* pos) {
     }
 }
 
-//Function: Realiza a leitura da baterria 
-//Parameters: string | position | lat e long
+//Function: Realiza a leitura da bateria 
+//Parameters: 
 //Return: -
 void CheckBattery() {
     float readValue = analogRead(battery);
-
+        
     //descarta numeros muito baixo
     if(readValue < 10)
     {
@@ -433,8 +460,8 @@ void CheckBattery() {
       return;  
     }
 
-    float inputVoltage = (readValue * 3.2) / 1023; //calculo para conversao
-    float batteryMeasurement = inputVoltage / 0.2; // calculo com base nos resistores (0.2)
+    float inputVoltage = (readValue * 3.2) / 1023; // calculo para conversao
+    float batteryMeasurement = inputVoltage / 0.2; 
     Serial.print(batteryMeasurement);
     Serial.println("V");
 
@@ -502,17 +529,27 @@ void CheckTruckOn() {
         isTruckOn = false;
         truckFinished = millis();
         truckDelayStop = 0;
+        UpdateWorkedHours();
     }
     else if(isTruckOn && truckDelayStop == 0 && vibrationMeasurement < 100) //verifica se realmente o trator foi desligado
     {
         Serial.println("Truck will stop?");
         truckDelayStop = millis();
     }
-    else if(isTruckOn && vibrationMeasurement > 100)
+    else if(isTruckOn && truckDelayStop != 0 && vibrationMeasurement > 100)
     {
         Serial.println("Truck delay stop clear");
         truckDelayStop = 0;
     }
+}
+
+//Function: Transforma o tempo de millisegundos para horas
+//Parameters: unsigned long | nMillis | millisegundos
+//Return: float | horas
+float milliToHours(unsigned long nMillis){
+    Serial.print("Millis - ");
+    Serial.println(nMillis);
+    return float(nMillis)/(3600 * 1000);
 }
 
 //Function: Atualiza as horas trabalhadas no Broker
@@ -521,11 +558,10 @@ void CheckTruckOn() {
 void UpdateWorkedHours() {
     if(!isTruckOn && truckStart > 0 && truckFinished > 0)
     {
-        String data = "wk|"; //topico para envio
-    
-        data += String(truckFinished - truckStart); // adiciona o tempo em millisegundos
+        String data = "lwk|";
+        data += String(milliToHours(truckFinished - truckStart)); // adiciona o tempo em millisegundos
 
-        if(mqtt.publish(TOPICO_PUBLISH , data.c_str())){
+        if(mqtt.publish(TOPICO_PUBLISH, data.c_str())){
             Serial.print("WorkedHours enviada com sucesso: ");  
             truckStart = 0;
             truckFinished = 0;  
